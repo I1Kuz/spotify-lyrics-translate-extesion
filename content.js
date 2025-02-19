@@ -6,10 +6,21 @@
 // Description: Handles all the webpage level activities (e.g. manipulating page data, etc.)
 // License: MIT
 
-
-
 var lyrics = []; // original rows
 var emptyRowsIndices = []; // contain indeces of empty rows
+
+const getTargetLang = () => {
+    return new Promise((resolve) => {
+        chrome.storage.local.get("targetLang", (data) => {
+            // console.log("Данные из storage:", data);
+            resolve(data.targetLang || "en"); // "en" by default
+        });
+    });
+};
+
+const getSourceLang = () => {
+    return "en"
+}
 
 const waitForLyrics = async (timeout = 5000) => {
     return new Promise((resolve) => {
@@ -70,17 +81,6 @@ const translateLine = async (line, source = "en", target) => {
     }
 };
 
-const getTargetLang = () => {
-    return new Promise((resolve) => {
-        chrome.storage.local.get("targetLang", (data) => {
-            console.log("Данные из storage:", data);
-            resolve(data.targetLang || "en"); // "en" by default
-        });
-    });
-};
-
-getTargetLang().then((lang) => console.log("Выбранный язык:", lang));
-
 // add translate below original text
 const addTranslation = async (elements, originalLyrics) => {
     for (let i = 0; i < originalLyrics.length; i++) {
@@ -88,59 +88,82 @@ const addTranslation = async (elements, originalLyrics) => {
 
         if (!elements[index].dataset.translated) {
             let translatedText = document.createElement("div");
-            translatedText.classList.add("translated-text")
-            translatedText.id = 'translated-text'
-
-            let targetLang = await getTargetLang();
-            let translatedLine = await translateLine(text, "en", targetLang);
-            // console.log(`Translate: "${text}" -> "${translatedLine}"`);
+            translatedText.classList.add("translated-text");
+            translatedText.id = 'translated-text';
+            
+            let target = await getTargetLang();
+            let source = await getSourceLang();
+            let translatedLine = await translateLine(text, source, target);
 
             translatedText.textContent = translatedLine;
 
             elements[index].appendChild(translatedText);
             elements[index].dataset.translated = "true"; // Mark, that row already translated
+            console.log("Перевод всех строк выполнен.");
         }
     }
+    
+};
+
+const removeTranslations = () => {
+    [...document.getElementsByClassName("translated-text")].forEach(n => n.remove());
+}
+
+const checkLyricsChange = (old_lyrics, new_lyrics) => {
+    return JSON.stringify(old_lyrics.map(l => l.text)) !== JSON.stringify(new_lyrics.map(l => l.text))
 };
 
 // main lyrics processing foo
-const processLyrics = async () => {
+const processLyrics = async (force) => {
     let elements = await waitForLyrics();
     let { lyrics_tmp, elements: lyricElements } = getOriginalLyrics();
 
-    if (JSON.stringify(lyrics_tmp.map(l => l.text)) !== JSON.stringify(lyrics.map(l => l.text))) {
+    if (await checkLyricsChange(lyrics_tmp, lyrics) || force) {
         lyrics = lyrics_tmp;
+
         await addTranslation(lyricElements, lyrics);
     }
 };
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "reloadTranslations") {
-        console.log("Translate reload...");
-        processLyrics(); // reload translate
-        sendResponse({ success: true });
+// chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+//     if (message.action === "reloadTranslations") {
+//         console.log("🔄 Получено сообщение: reloadTranslations");
+        
+//         // Удаляем старый перевод
+//         [...document.getElementsByClassName("translated-text")].forEach(n => n.remove());
+        
+//         // Очистка кеша перевода
+//         lyrics = [];
+//         emptyRowsIndices = [];
+
+//         // Перезапускаем процесс перевода
+//         processLyrics(force = true); 
+//         console.log("Перевод выполнен")
+
+//         sendResponse({ status: "success" });
+//     }
+// });
+
+chrome.storage.onChanged.addListener(async (changes, area) => {
+    if (area === "local" && changes.targetLang) {
+        console.log("🌍 Язык изменён, перезапускаем перевод...");
+
+        // Получаем новый язык
+        const newLang = await getTargetLang();
+        console.log(`🎯 Новый язык: ${newLang}`);
+
+        // Очищаем старые данные
+        lyrics = [];
+        emptyRowsIndices = [];
+        removeTranslations();
+
+        // Ждём 100 мс, чтобы браузер успел обновить локальное хранилище
+        setTimeout(() => processLyrics(true), 100);
     }
 });
 
-// changes in DOM spectator lol 
-const observer = new MutationObserver((mutations) => {
-    let shouldUpdate = false;
-
-    mutations.forEach(mutation => {
-        mutation.addedNodes.forEach(node => {
-            if (node.nodeType === 1 && node.matches('[data-testid="fullscreen-lyric"]') && !node.dataset.translated) {
-                shouldUpdate = true;
-            }
-        });
-    });
-
-    if (shouldUpdate) {
-        processLyrics();
-    }
-});
 
 // start text processing
 window.onload = () => {
     processLyrics();
-    observer.observe(document.body, { childList: true, subtree: true });
 };

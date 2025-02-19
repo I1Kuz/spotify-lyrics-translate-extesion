@@ -9,17 +9,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
     select.addEventListener("change", async (e) => {
         await chrome.storage.local.set({ targetLang: e.target.value });
-
-        // delete old translate
-        [...document.getElementsByClassName("translated-text")].forEach(n => n.remove());
-
-        // send message to content.js, if it is already loaded
-        chrome.runtime.sendMessage({ action: "reloadTranslations" }, (response) => {
-            if (chrome.runtime.lastError) {
-                console.error("Ошибка отправки сообщения:", chrome.runtime.lastError.message);
-            } else {
-                console.log("Сообщение успешно отправлено.");
-            }
-        });
+        // Отправляем сообщение в content.js
+        // chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        //     if (tabs[0]?.id) {
+        //         chrome.tabs.sendMessage(tabs[0].id, { action: "reloadTranslations" }, (response) => {
+        //             if (chrome.runtime.lastError) {
+        //                 console.error("Ошибка отправки сообщения:", chrome.runtime.lastError.message);
+        //             } else {
+        //                 console.log("Сообщение успешно отправлено.");
+        //             }
+        //         });
+        //     }
+        // });
     });
 });
