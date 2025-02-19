@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Lyrics translater",
+  "description": "",
+  "version": "1.0",
+  "icons": {
+    "64": "images/logo.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "index.html",
+    "default_icon": {
+      "64": "images/logo.png" 
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://open.spotify.com/*"],
+      "js": ["content.js"],
+      "css": ["style.css"]
+    }
+  ],
+  "permissions": ["storage", "declarativeContent","scripting", "activeTab"]
+}
