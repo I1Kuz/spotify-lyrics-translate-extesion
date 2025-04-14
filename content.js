@@ -1,169 +1,297 @@
 // content.js
-// Author:
+// Author: Ivan Kuznetsov
 // Author URI: https://
-// Author Github URI: https://www.github.com/
-// Project Repository URI: https://github.com/
+// Author Github URI: https://www.github.com/I1Kuz
+// Project Repository URI: https://github.com/I1Kuz/spotify-lyrics-translate-extesion
 // Description: Handles all the webpage level activities (e.g. manipulating page data, etc.)
 // License: MIT
 
-var lyrics = []; // original rows
-var emptyRowsIndices = []; // contain indeces of empty rows
+console.log("version: 6")
 
-const getTargetLang = () => {
-    return new Promise((resolve) => {
-        chrome.storage.local.get("targetLang", (data) => {
-            // console.log("Данные из storage:", data);
-            resolve(data.targetLang || "en"); // "en" by default
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔧 Globals
+// ─────────────────────────────────────────────────────────────────────────────
+
+let originalLyricsLines = []; // all lyrics lines except empty ones
+let emptyLineIndices = []; // indices of empty or ignored rows (e.g., "♪")
+let translatedLineIndices = []; // indices of translated lines
+let translationCompleted = false; // whether current lyrics have been translated
+let currentTrackLabel = ""; // formatted string like "Artist, Artist* - Song"
+let toggleState = false;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔁 Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const chunkArray = (array, size) => {
+    const result = [];
+    for (let i = 0; i < array.length; i += size) {
+        result.push(array.slice(i, i + size));
+    }
+    return result;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🧠 Lyrics Parsing & Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+const isLyricsButtonActive = () => {
+    const lyricsButton = document.querySelector("[data-testid='lyrics-button']");
+    if (!lyricsButton) return false;
+    return lyricsButton.dataset?.active === "true";
+};
+
+const extractLyricsFromDOM = () => {
+    let elements = document.querySelectorAll('[data-testid="fullscreen-lyric"]');
+    let lines = [];
+    emptyLineIndices = [];
+
+    elements.forEach((el, i) => {
+        const text = el.textContent.trim();
+        if (text && text !== "♪") {
+            lines.push({ text, index: i });
+        } else {
+            emptyLineIndices.push(i);
+        }
+    });
+
+    return { lines, elements };
+};
+
+const detectLanguage = async (text) => {
+    return new Promise((resolve, reject) => {
+        chrome.i18n.detectLanguage(text, (result) => {
+            if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+            else if (result?.languages?.length > 0) resolve(result.languages[0].language);
+            else resolve(undefined);
         });
     });
 };
 
-const getSourceLang = () => {
-    return "en"
-}
+const detectSourceLanguage = async () => {
+    const { lines } = extractLyricsFromDOM();
+    const combinedText = lines.map(line => line.text).join(" ");
+    return await detectLanguage(combinedText);
+};
 
-const waitForLyrics = async (timeout = 5000) => {
-    return new Promise((resolve) => {
-        const startTime = Date.now();
-
-        const checkLyrics = () => {
-            let elements = document.querySelectorAll('[data-testid="fullscreen-lyric"]');
-            if (elements.length > 0 || Date.now() - startTime > timeout) {
+const waitForLyricsToLoad = async (timeout = 5000) => {
+    const start = Date.now();
+    return new Promise(resolve => {
+        const poll = () => {
+            const elements = document.querySelectorAll('[data-testid="fullscreen-lyric"]');
+            if (elements.length > 0 || Date.now() - start > timeout) {
                 resolve(elements);
             } else {
-                requestAnimationFrame(checkLyrics);
+                requestAnimationFrame(poll);
             }
         };
-
-        checkLyrics();
+        poll();
     });
 };
 
-const getOriginalLyrics = () => {
-    let lyrics_tmp = [];
-    let elements = document.querySelectorAll('[data-testid="fullscreen-lyric"]');
+// ─────────────────────────────────────────────────────────────────────────────
+// 🌐 Translation
+// ─────────────────────────────────────────────────────────────────────────────
 
-    emptyRowsIndices = [];
+const fetchTranslation = async (text, source = "en", target, attempt = 1) => {
+    if (!text) return "";
 
-    elements.forEach((element, i) => {
-        let row = element.textContent.trim();
-        if (row !== "♪" && row !== "") {
-            lyrics_tmp.push({ text: row, index: i });
-        } else {
-            emptyRowsIndices.push(i);
-        }
-    });
+    const cacheKey = `translation-${source}-${target}-${text}`;
+    const cached = await chrome.storage.local.get(cacheKey);
+    if (cached[cacheKey]) return cached[cacheKey];
 
-    return { lyrics_tmp, elements };
-};
-
-const translateLine = async (line, source = "en", target) => {
-    if (!line) return "";
-
-    const cacheKey = `translation-${source}-${target}-${line}`;
-    const cachedTranslation = await chrome.storage.local.get(cacheKey);
-
-    if (cachedTranslation[cacheKey]) {
-        return cachedTranslation[cacheKey];
-    }
-
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${source}&tl=${target}&dt=t&q=${encodeURIComponent(line)}`;
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${source}&tl=${target}&dt=t&q=${encodeURIComponent(text)}`;
 
     try {
         const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
         const data = await res.json();
-        const translation = data[0].map(sentence => sentence[0]).join(" ");
-        await chrome.storage.local.set({ [cacheKey]: translation });
-        return translation;
-    } catch (error) {
-        console.error("Ошибка перевода:", error);
+        const translated = data[0].map(segment => segment[0]).join(" ");
+        await chrome.storage.local.set({ [cacheKey]: translated });
+        return translated;
+    } catch (err) {
+        console.warn(`Attempt ${attempt} failed:`, err.message);
+        if (attempt < 3) {
+            await delay(1000 * attempt);
+            return await fetchTranslation(text, source, target, attempt + 1);
+        }
         return "Cannot translate...";
     }
 };
 
-// add translate below original text
-const addTranslation = async (elements, originalLyrics) => {
-    for (let i = 0; i < originalLyrics.length; i++) {
-        let { text, index } = originalLyrics[i];
+const injectTranslatedLyrics = async (elements, originalLines) => {
+    const targetLang = await getTargetLanguage();
+    const sourceLang = await detectSourceLanguage();
 
-        if (!elements[index].dataset.translated) {
-            let translatedText = document.createElement("div");
-            translatedText.classList.add("translated-text");
-            translatedText.id = 'translated-text';
-            
-            let target = await getTargetLang();
-            let source = await getSourceLang();
-            let translatedLine = await translateLine(text, source, target);
+    const linesToTranslate = originalLines.filter(line => !translatedLineIndices.includes(line.index));
+    const chunks = chunkArray(linesToTranslate, 5);
+    const translatedMap = {};
 
-            translatedText.textContent = translatedLine;
+    for (const chunk of chunks) {
+        const translatedTexts = await Promise.all(chunk.map(({ text }) => fetchTranslation(text, sourceLang, targetLang)));
+        chunk.forEach((line, i) => {
+            translatedMap[line.index] = translatedTexts[i];
+            translatedLineIndices.push(line.index);
+        });
+        await delay(500);
+    }
 
-            elements[index].appendChild(translatedText);
-            elements[index].dataset.translated = "true"; // Mark, that row already translated
-            console.log("Перевод всех строк выполнен.");
+    Object.entries(translatedMap).forEach(([indexStr, translated]) => {
+        const index = parseInt(indexStr);
+        const container = elements[index];
+        if (!container) return;
+
+        if (!container.querySelector(".translated-text")) {
+            const div = document.createElement("div");
+            div.classList.add("translated-text");
+            div.textContent = translated;
+            container.appendChild(div);
         }
+    });
+
+    translationCompleted = true;
+    console.log("✅ Translation complete");
+};
+
+const clearAllTranslations = () => {
+    [...document.getElementsByClassName("translated-text")].forEach(el => el.remove());
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🧹 Resetting
+// ─────────────────────────────────────────────────────────────────────────────
+
+const resetTranslationState = () => {
+    originalLyricsLines = [];
+    emptyLineIndices = [];
+    translatedLineIndices = [];
+    translationCompleted = false;
+    clearAllTranslations();
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🎵 Track Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+const getNowPlayingTrackLabel = () => {
+    const widget = document.querySelector('[data-testid="now-playing-widget"]');
+    if (!widget) return null;
+
+    const songNode = widget.querySelector('a[data-testid="context-item-link"]');
+    const artistNodes = widget.querySelectorAll('a[data-testid="context-item-info-artist"]');
+
+    if (!songNode || artistNodes.length === 0) return null;
+
+    const song = songNode.textContent.trim();
+    const artists = Array.from(artistNodes).map(a => a.textContent.trim()).join(", ");
+    return `${artists} - ${song}`;
+};
+
+const hasTrackChanged = () => {
+    const newTrack = getNowPlayingTrackLabel();
+    if (!newTrack) return false;
+
+    if (newTrack !== currentTrackLabel) {
+        currentTrackLabel = newTrack;
+        return true;
     }
-    
+    return false;
 };
 
-const removeTranslations = () => {
-    [...document.getElementsByClassName("translated-text")].forEach(n => n.remove());
-}
-
-const checkLyricsChange = (old_lyrics, new_lyrics) => {
-    return JSON.stringify(old_lyrics.map(l => l.text)) !== JSON.stringify(new_lyrics.map(l => l.text))
+const handleLyricsProcessing = async () => {
+    const { lines, elements } = extractLyricsFromDOM();
+    await injectTranslatedLyrics(elements, lines);
 };
 
-// main lyrics processing foo
-const processLyrics = async (force) => {
-    let elements = await waitForLyrics();
-    let { lyrics_tmp, elements: lyricElements } = getOriginalLyrics();
+// ─────────────────────────────────────────────────────────────────────────────
+// 📦 Storage Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-    if (await checkLyricsChange(lyrics_tmp, lyrics) || force) {
-        lyrics = lyrics_tmp;
-
-        await addTranslation(lyricElements, lyrics);
+const getUserToggleState = async () => {
+    try {
+        const { isToggleChecked } = await chrome.storage.local.get("isToggleChecked");
+        return isToggleChecked ?? true;
+    } catch (error) {
+        console.error("Failed to retrieve toggle state:", error);
+        return true;
     }
 };
 
-// chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-//     if (message.action === "reloadTranslations") {
-//         console.log("🔄 Получено сообщение: reloadTranslations");
-        
-//         // Удаляем старый перевод
-//         [...document.getElementsByClassName("translated-text")].forEach(n => n.remove());
-        
-//         // Очистка кеша перевода
-//         lyrics = [];
-//         emptyRowsIndices = [];
+const getTargetLanguage = async () => {
+    try {
+        const { targetLang } = await chrome.storage.local.get("targetLang");
+        return targetLang || "en";
+    } catch (error) {
+        console.error("Failed to retrieve target language:", error);
+        return "en";
+    }
+};
 
-//         // Перезапускаем процесс перевода
-//         processLyrics(force = true); 
-//         console.log("Перевод выполнен")
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔄 Storage Listener
+// ─────────────────────────────────────────────────────────────────────────────
 
-//         sendResponse({ status: "success" });
-//     }
-// });
+chrome.runtime.onMessage.addListener(async (message) => {
+    if (message.type === "language-changed") {
+        if (!toggleState) return;
+        console.log(`📩 Received ${message.type} message, reprocessing lyrics...`);
+        resetTranslationState();
 
-chrome.storage.onChanged.addListener(async (changes, area) => {
-    if (area === "local" && changes.targetLang) {
-        console.log("🌍 Язык изменён, перезапускаем перевод...");
+        await waitForLyricsToLoad();
+        setTimeout(() => handleLyricsProcessing(), 250);
+    }
 
-        // Получаем новый язык
-        const newLang = await getTargetLang();
-        console.log(`🎯 Новый язык: ${newLang}`);
+    if (message.type === "toggle-updated") {
+        console.log("🔘 Toggle was changed. Reloading logic...");
+        toggleState = await getUserToggleState();
 
-        // Очищаем старые данные
-        lyrics = [];
-        emptyRowsIndices = [];
-        removeTranslations();
+        if (!toggleState) {
+            console.log("🔘 Toggle is false");
+            resetTranslationState();
+            return;
+        }
 
-        // Ждём 100 мс, чтобы браузер успел обновить локальное хранилище
-        setTimeout(() => processLyrics(true), 100);
+        console.log("🔘 Toggle is true");
     }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 👁️ Mutation Observer
+// ─────────────────────────────────────────────────────────────────────────────
 
-// start text processing
-window.onload = () => {
-    processLyrics();
+let observer;
+
+const observeLyricsDisplay = () => {
+    observer = new MutationObserver(async () => {
+        toggleState = await getUserToggleState();
+
+        if(!toggleState) {return}
+
+        const lyricsVisible = isLyricsButtonActive();
+        const trackHasChanged = hasTrackChanged();
+
+        if (lyricsVisible && (trackHasChanged || !translationCompleted)) {
+            console.log("🎶 New track or lyrics activated, beginning translation...");
+            resetTranslationState();
+
+            const elements = await waitForLyricsToLoad();
+            if (elements.length > 0) {
+                handleLyricsProcessing();
+            } else {
+                console.warn("❌ Lyrics did not load in time.");
+            }
+        }
+
+        if (!lyricsVisible) {
+            resetTranslationState();
+        }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
 };
+
+
+observeLyricsDisplay();

@@ -3,14 +3,16 @@
 /* page styles */
 .translated-text{
     color: #ffffff;
-    font-size: 24px;
-    margin-top: -25px;
+    font-size: 25px;
+    margin-top: -23px;
     opacity: 0.8;
+    font-weight: 350;
+    font-style: italic;
 }
 
 
 
-/* extincion styles */
+/* popup styles */
 
 .h-wrapper {
     color: white;
@@ -108,14 +110,22 @@ body{
   }
 
   .about {
-    color: rgba(255, 255, 255, 0.562);
-    text-decoration: none;
-    font-size: 12px;
-    size: 1;
+    /* color: rgba(255, 255, 255, 0.8);  */
+    /* text-decoration: none; */
     display: flex;
     justify-content: space-between;
-    -ms-flex-align: end;
+    align-items: flex-end;
     flex-direction: row;
     margin-top: 10px;
+}
 
-  }
+  .about a {
+    color: rgba(255, 255, 255, 0.8); /* Базовый цвет */
+    text-decoration: none;
+    font-size: 12px;
+    transition: color 0.2s ease-in-out; /* Плавное изменение цвета */
+}
+
+  .about a:hover {
+    color: rgba(255, 255, 255, 1); /* При наведении немного светлее */
+}
