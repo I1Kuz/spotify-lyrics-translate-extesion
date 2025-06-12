@@ -3,8 +3,7 @@ This extension project provides translation of Spotify song lyrics using Google 
 
 ## Features
 - Translate lyrics in spotify to different languages
-- ..
-- ..
+- Change style and size of lyrics
 
 ## Author
 Ikuz
@@ -12,12 +11,7 @@ Ikuz
 - [Project Repository](https://github.com/I1Kuz/spotify-lyrics-translate-extesion)
 
 ## Requirements
-- Cromium based browser*
-
-### For End Users
-1. ...
-2. ...
-3. ...
+- Cromium based browser lol-
 
 ## License
 [Please refer to LICENSE file.](https://github.com/I1Kuz/spotify-lyrics-translate-extesion/blob/main/LICENSE)
