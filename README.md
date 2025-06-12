@@ -14,4 +14,4 @@ Ikuz
 - Cromium based browser lol-
 
 ## License
-[Please refer to LICENSE file.](https://github.com/I1Kuz/spotify-lyrics-translate-extesion/blob/main/LICENSE)
+[LICENSE](https://github.com/I1Kuz/spotify-lyrics-translate-extesion/blob/main/LICENSE)
