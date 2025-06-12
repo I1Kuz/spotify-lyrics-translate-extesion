@@ -1,51 +1,53 @@
-// content.js
-// Author: Ivan Kuznetsov
-// Author URI: https://
-// Author Github URI: https://www.github.com/I1Kuz
-// Project Repository URI: https://github.com/I1Kuz/spotify-lyrics-translate-extesion
-// Description: Handles all the webpage level activities (e.g. manipulating page data, etc.)
-// License: MIT
+console.log("version: 7");
 
-console.log("version: 6")
+// 
+// Globals
+// 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 🔧 Globals
-// ─────────────────────────────────────────────────────────────────────────────
-
-let originalLyricsLines = []; // all lyrics lines except empty ones
-let emptyLineIndices = []; // indices of empty or ignored rows (e.g., "♪")
-let translatedLineIndices = []; // indices of translated lines
-let translationCompleted = false; // whether current lyrics have been translated
-let currentTrackLabel = ""; // formatted string like "Artist, Artist* - Song"
+let originalLyricsLines = [];
+let emptyLineIndices = [];
+let translatedLineIndices = [];
+let translationCompleted = false;
+let currentTrackLabel = "";
 let toggleState = false;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 🔁 Utilities
-// ─────────────────────────────────────────────────────────────────────────────
+// 
+// Utilities
+// 
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-const chunkArray = (array, size) => {
-    const result = [];
-    for (let i = 0; i < array.length; i += size) {
-        result.push(array.slice(i, i + size));
-    }
-    return result;
+const applyStoredStyles = async () => {
+    const { fontSize, fontStyle } = await getTranslatedTextStyles();
+
+    document.querySelectorAll(".translated-text").forEach(el => {
+        el.style.fontSize = fontSize;
+
+        if (fontStyle === "bold") {
+            el.style.fontWeight = "bold";
+            el.style.fontStyle = "normal";
+        } else if (fontStyle === "italic") {
+            el.style.fontWeight = "350";
+            el.style.fontStyle = "italic";
+        } else {
+            el.style.fontWeight = "350";
+            el.style.fontStyle = "normal";
+        }
+    });
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 🧠 Lyrics Parsing & Detection
-// ─────────────────────────────────────────────────────────────────────────────
+// 
+// Lyrics Parsing & Detection
+// 
 
 const isLyricsButtonActive = () => {
     const lyricsButton = document.querySelector("[data-testid='lyrics-button']");
-    if (!lyricsButton) return false;
-    return lyricsButton.dataset?.active === "true";
+    return lyricsButton?.dataset?.active === "true";
 };
 
 const extractLyricsFromDOM = () => {
-    let elements = document.querySelectorAll('[data-testid="fullscreen-lyric"]');
-    let lines = [];
+    const elements = document.querySelectorAll('[data-testid="fullscreen-lyric"]');
+    const lines = [];
     emptyLineIndices = [];
 
     elements.forEach((el, i) => {
@@ -91,14 +93,14 @@ const waitForLyricsToLoad = async (timeout = 5000) => {
     });
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 🌐 Translation
-// ─────────────────────────────────────────────────────────────────────────────
+// 
+// Translation
+// 
 
 const fetchTranslation = async (text, source = "en", target, attempt = 1) => {
     if (!text) return "";
 
-    const cacheKey = `translation-${source}-${target}-${text}`;
+    const cacheKey = `translation-${source}-${target}-${text.slice(0, 100)}`;
     const cached = await chrome.storage.local.get(cacheKey);
     if (cached[cacheKey]) return cached[cacheKey];
 
@@ -107,9 +109,9 @@ const fetchTranslation = async (text, source = "en", target, attempt = 1) => {
     try {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
         const data = await res.json();
-        const translated = data[0].map(segment => segment[0]).join(" ");
+
+        const translated = data[0].map(segment => segment[0]).join("");
         await chrome.storage.local.set({ [cacheKey]: translated });
         return translated;
     } catch (err) {
@@ -127,42 +129,60 @@ const injectTranslatedLyrics = async (elements, originalLines) => {
     const sourceLang = await detectSourceLanguage();
 
     const linesToTranslate = originalLines.filter(line => !translatedLineIndices.includes(line.index));
-    const chunks = chunkArray(linesToTranslate, 5);
-    const translatedMap = {};
+    const delimiter = "|||";
+    const textToTranslate = linesToTranslate.map(line => line.text).join(` ${delimiter} `);
 
-    for (const chunk of chunks) {
-        const translatedTexts = await Promise.all(chunk.map(({ text }) => fetchTranslation(text, sourceLang, targetLang)));
-        chunk.forEach((line, i) => {
-            translatedMap[line.index] = translatedTexts[i];
-            translatedLineIndices.push(line.index);
-        });
-        await delay(500);
-    }
+    const translatedText = await fetchTranslation(textToTranslate, sourceLang, targetLang);
+    const translatedLines = translatedText.split(new RegExp(`\\s*\\|\\|\\|\\s*`, 'g'));
 
-    Object.entries(translatedMap).forEach(([indexStr, translated]) => {
-        const index = parseInt(indexStr);
-        const container = elements[index];
-        if (!container) return;
+    const { fontSize, fontStyle } = await getTranslatedTextStyles();
 
-        if (!container.querySelector(".translated-text")) {
-            const div = document.createElement("div");
-            div.classList.add("translated-text");
-            div.textContent = translated;
-            container.appendChild(div);
+    translatedLines.forEach((translated, i) => {
+        const line = linesToTranslate[i];
+        if (!line) return;
+
+        const container = elements[line.index];
+        if (!container || translatedLineIndices.includes(line.index)) return;
+
+        const originalLineElement = container.querySelector("div");
+        const div = document.createElement("div");
+
+        div.classList.add("translated-text");
+        // Just copy classes from original div
+        if (originalLineElement) {
+            div.className = `${originalLineElement.className} translated-text`;
         }
+
+        // Apply styles from storage
+        div.style.fontSize = fontSize;
+        if (fontStyle === "bold") {
+            div.style.fontWeight = "bold";
+            div.style.fontStyle = "normal";
+        } else if (fontStyle === "italic") {
+            div.style.fontWeight = "350";
+            div.style.fontStyle = "italic";
+        } else {
+            div.style.fontWeight = "350";
+            div.style.fontStyle = "normal";
+        }
+
+        div.textContent = translated;
+        container.appendChild(div);
+
+        translatedLineIndices.push(line.index);
     });
 
     translationCompleted = true;
     console.log("✅ Translation complete");
 };
 
+// 
+// Resetting
+// 
+
 const clearAllTranslations = () => {
     [...document.getElementsByClassName("translated-text")].forEach(el => el.remove());
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 🧹 Resetting
-// ─────────────────────────────────────────────────────────────────────────────
 
 const resetTranslationState = () => {
     originalLyricsLines = [];
@@ -172,9 +192,9 @@ const resetTranslationState = () => {
     clearAllTranslations();
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 🎵 Track Detection
-// ─────────────────────────────────────────────────────────────────────────────
+// 
+// Track Detection
+// 
 
 const getNowPlayingTrackLabel = () => {
     const widget = document.querySelector('[data-testid="now-playing-widget"]');
@@ -206,82 +226,112 @@ const handleLyricsProcessing = async () => {
     await injectTranslatedLyrics(elements, lines);
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 📦 Storage Helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// 
+// Storage Helpers
+// 
 
 const getUserToggleState = async () => {
     try {
-        const { isToggleChecked } = await chrome.storage.local.get("isToggleChecked");
-        return isToggleChecked ?? true;
+        if (!chrome?.runtime?.id) {
+            console.warn("⚠️ chrome.runtime not active");
+            return true;
+        }
+
+        const response = await chrome.runtime.sendMessage({ type: "get-toggle-state" });
+        return response?.isToggleChecked ?? true;
     } catch (error) {
-        console.error("Failed to retrieve toggle state:", error);
+        console.warn("Failed to retrieve toggle state:", error);
         return true;
     }
 };
 
 const getTargetLanguage = async () => {
     try {
-        const { targetLang } = await chrome.storage.local.get("targetLang");
-        return targetLang || "en";
+        if (!chrome?.runtime?.id) return "en";
+
+        const response = await chrome.runtime.sendMessage({ type: "get-target-language" });
+        return response?.targetLang ?? "en";
     } catch (error) {
-        console.error("Failed to retrieve target language:", error);
+        console.warn("Failed to retrieve target language:", error);
         return "en";
     }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 🔄 Storage Listener
-// ─────────────────────────────────────────────────────────────────────────────
+const getTranslatedTextStyles = async () => {
+    try {
+        if (!chrome?.runtime?.id) {
+            return { fontSize: "25px", fontStyle: "italic" };
+        }
+
+        const response = await chrome.runtime.sendMessage({ type: "get-translated-styles" });
+        return {
+            fontSize: response?.fontSize ?? "25px",
+            fontStyle: response?.fontStyle ?? "italic"
+        };
+    } catch (error) {
+        console.warn("Failed to retrieve styles:", error);
+        return { fontSize: "25px", fontStyle: "italic" };
+    }
+};
+
+// 
+// Storage Listener
+// 
 
 chrome.runtime.onMessage.addListener(async (message) => {
     if (message.type === "language-changed") {
         if (!toggleState) return;
-        console.log(`📩 Received ${message.type} message, reprocessing lyrics...`);
+        console.log(`Received ${message.type} message, reprocessing lyrics...`);
         resetTranslationState();
 
         await waitForLyricsToLoad();
         setTimeout(() => handleLyricsProcessing(), 250);
     }
+    if (message.type === 'style-updated') {
+        applyStoredStyles();
+    }
 
     if (message.type === "toggle-updated") {
-        console.log("🔘 Toggle was changed. Reloading logic...");
+        console.log("Toggle was changed. Reloading logic...");
         toggleState = await getUserToggleState();
 
         if (!toggleState) {
-            console.log("🔘 Toggle is false");
+            console.log("Toggle is false");
             resetTranslationState();
             return;
         }
 
-        console.log("🔘 Toggle is true");
+        console.log("Toggle is true");
     }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 👁️ Mutation Observer
-// ─────────────────────────────────────────────────────────────────────────────
+// 
+// Mutation Observer
+// 
 
 let observer;
 
 const observeLyricsDisplay = () => {
     observer = new MutationObserver(async () => {
+        if (!chrome?.runtime?.id) {
+            console.log("Chrome runtime not available - observer not starting");
+            return;
+        }
         toggleState = await getUserToggleState();
-
-        if(!toggleState) {return}
+        if (!toggleState) return;
 
         const lyricsVisible = isLyricsButtonActive();
         const trackHasChanged = hasTrackChanged();
 
         if (lyricsVisible && (trackHasChanged || !translationCompleted)) {
-            console.log("🎶 New track or lyrics activated, beginning translation...");
+            console.log("New track or lyrics activated, beginning translation...");
             resetTranslationState();
 
             const elements = await waitForLyricsToLoad();
             if (elements.length > 0) {
                 handleLyricsProcessing();
             } else {
-                console.warn("❌ Lyrics did not load in time.");
+                console.warn("Lyrics did not load in time.");
             }
         }
 

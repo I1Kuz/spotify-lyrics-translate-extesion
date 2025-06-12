@@ -1,12 +1,30 @@
-// background.js
-// Author:
-// Author URI: https://
-// Author Github URI: https://www.github.com/
-// Project Repository URI: https://github.com/
-// Description: Handles all the browser level activities (e.g. tab management, etc.)
-// License: MIT
-
 chrome.runtime.onInstalled.addListener(() => {
     console.log("Extension installed");
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "get-toggle-state") {
+        chrome.storage.local.get("isToggleChecked", (result) => {
+            sendResponse({ isToggleChecked: result.isToggleChecked });
+        });
+        return true;
+    }
+
+    if (message.type === "get-target-language") {
+        chrome.storage.local.get("targetLang", (result) => {
+            sendResponse({ targetLang: result.targetLang });
+        });
+        return true;
+    }
+
+    if (message.type === "get-translated-styles") {
+        chrome.storage.local.get(["fontSize", "fontStyle"], (result) => {
+            sendResponse({
+                fontSize: result.fontSize,
+                fontStyle: result.fontStyle
+            });
+        });
+        return true;
+    }
 });
 
