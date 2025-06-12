@@ -15,8 +15,8 @@
 ---
 
 ## Screenshots
-# ![1](images\screenshot_main.png)
-# ![2](images\screenshot_settings.png)
+# ![1](images/screenshot_main.png)
+# ![2](images/screenshot_settings.png)
 
 ## ⚙️ Installation
 
